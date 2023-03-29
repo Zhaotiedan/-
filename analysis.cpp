@@ -75,9 +75,9 @@ string changeHex(string infor)//2进制字符串转16进制字符串,保证每�
 	}
 	return res;
 }
-int changeNum(string bstr)//2进制字符串转10进制正数
+long long changeNum(string bstr)//2进制字符串转10进制正数
 {
-	int res = 0;
+	long long res = 0;
 	int x = 0;//2的次方
 	for (int i = bstr.size() - 1; i >= 0; i--)
 	{
@@ -196,6 +196,10 @@ public:
 		_desAddr += d4;
 		cout << "Destination Address:" << _desAddr << endl; 
 	}
+	string GetAgreement()
+	{
+		return _agreement;
+	}
 private:
 	string _version;//版本协议
 	int _headLength;//报头长度
@@ -212,10 +216,118 @@ private:
 
 class TCP
 {
-private:
-	string _sourPort;//源端口
-	string _desPort;//目的端口
+public:
+	void tcpAnalysis(string tcpstr)
+	{
+		//1.源端口
+		_sourPort = changeNum(tcpstr.substr(0, 16));
+		cout << "Source Port:" << _sourPort << endl;
+		//2.目的端口
+		_desPort= changeNum(tcpstr.substr(16, 16));
+		cout << "Destination Port:" << _desPort << endl;
+		//3.序号
+		_seqNum = to_string(changeNum(tcpstr.substr(32, 32)));
+		cout << "Sequence Number:" << _seqNum << endl;
+		//4.确认号
+		_ackNum = to_string(changeNum(tcpstr.substr(64, 32)));
+		cout << "Acknowledgment Number:" << _ackNum << endl;
+		//5.包头部长度
+		_headLength= changeNum(tcpstr.substr(96, 4));//首部长度单位为4B
+		cout << "Head Length:" << _headLength*4 << endl;
+		//6.窗口大小
+		_winSize= changeNum(tcpstr.substr(96+16, 16));
+		cout << "Window:" << _winSize << endl;
 
+	}
+private:
+	int _sourPort;//源端口
+	int _desPort;//目的端口
+	string _seqNum;//序号
+	string _ackNum;//确认号
+	int _headLength;//长度
+	int _winSize;//窗口大小
+};
+
+class UDP
+{
+public:
+	void udpAnalysis(string udpstr)
+	{
+		//1.源端口
+		_sourPort = changeNum(udpstr.substr(0, 16));
+		cout << "Source Port: " << _sourPort << endl;
+		//2.目的端口
+		_desPort = changeNum(udpstr.substr(16, 16));
+		cout << "Destination Port: " << _desPort << endl;
+		//3.报文长度
+		_length = changeNum(udpstr.substr(32, 16));
+		cout << "Length: " << _length << endl;
+		//4.首部校验和
+		string checsum = udpstr.substr(48, 16);//下标32开始
+		string child;
+		for (int i = 0; i < checsum.size(); i++)
+		{
+			child += checsum[i];
+			if (child.size() == 4)
+			{
+				_headChecSum += changeHex(child);
+				child = "";
+			}
+		}
+		cout << "Checksum: 0x" << _headChecSum << endl;
+	}
+private:
+	int _sourPort;//源端口
+	int _desPort;//目的端口
+	//首部长度固定8个字节
+	int _length;//udp数据报总长度
+	string _headChecSum;//首部校验和
+};
+
+class ICMP
+{
+public:
+	void icmpAnalysis(string icmpstr)
+	{
+		//1.报文类型
+		int typenum = changeNum(icmpstr.substr(0, 8));
+		switch(typenum)
+		{
+		case 0:_type = "Echo request";
+			break;
+		case 5:_type = "Redirect for host";
+			break;
+		case 8:_type = "Echo Reply";
+			break;
+		case 11:_type = "TTL equals 0 during transit";
+			break;
+		case 12:_type = "IP header bad (catchall error)";
+			break;
+		case 13:_type = "Timestamp request ";
+			break;
+		}
+		cout << "Type: " << _type << endl;
+		//2.错误原因
+		_code = changeNum(icmpstr.substr(8, 8));
+		cout << "Code: " << _code << endl;
+		//3.检验和
+		string checsum = icmpstr.substr(16, 16);//下标32开始
+		string child;
+		for (int i = 0; i < checsum.size(); i++)
+		{
+			child += checsum[i];
+			if (child.size() == 4)
+			{
+				_checkSum += changeHex(child);
+				child = "";
+			}
+		}
+		cout << "Checksum: 0x" << _checkSum << endl;
+	}
+private:
+	string _type;//报文类型
+	int _code;//错误原因
+	string _checkSum;//检验和
 };
 
 bool connectDB(MYSQL& mysql)
@@ -298,6 +410,7 @@ void Analysis(vector<Packet> vp)
 {
 	for (int i = 0; i < vp.size(); i++)
 	{
+		cout << "PacketNum:" << "<<" << i + 1 << ">>" << endl;
 		string usestr = changeBin(vp[i]._infor);//16进制转2进制字符串
 		//测试
 		//cout << usestr << endl;
@@ -305,13 +418,39 @@ void Analysis(vector<Packet> vp)
 		/*1.网络层IP包头部信息*/
 		cout << "*Internet Protocol*" << endl;
 		IP ip;
-		int iphead = changeNum(usestr.substr(116, 4)) * 4 * 8;
+		int iphead = changeNum(usestr.substr(116, 4)) * 4 * 8;//ip头部长度
 		ip.ipAnalysis(usestr.substr(112, iphead));//ip:从112+长度个字节开始存储
 		cout << endl;
 
 		/*2.传输层*/
-		cout << "*Transmission Control Protocol*" << endl;
-
+		
+		//根据ip内封装的协议判断
+		string agreement = ip.GetAgreement();
+		if (agreement == "TCP")
+		{
+			cout << "*Transmission Control Protocol *" << endl;
+			TCP tcp;
+			int tcpstart = 112 + iphead;
+			int tcphead = changeNum(usestr.substr(tcpstart + 96, 4)) * 4 * 8;//tcp头部长度
+			tcp.tcpAnalysis(usestr.substr(tcpstart, tcphead));
+			cout << endl;
+		}
+		else if (agreement == "UDP")
+		{
+			cout << "*User Datagram Protocol*" << endl;
+			UDP udp;
+			int udpstart= 112 + iphead;
+			udp.udpAnalysis(usestr.substr(udpstart, 64));//udp首部固定8个字节
+			cout << endl;
+		}
+		else if (agreement == "ICMP")
+		{
+			cout << "*Internet Control Message Protocol *" << endl;
+			ICMP icmp;
+			int icmpstart = 112 + iphead;
+			icmp.icmpAnalysis(usestr.substr(icmpstart, 32));//只需要分析32个比特位的信息
+			cout << endl;
+		}
 	}
 
 }
